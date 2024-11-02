@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <windows.h>
@@ -5,6 +6,19 @@
 #include <mmreg.h>
 #include <math.h>
 #include "run_event_loop.h"
+
+#define VSYNC_CONTEXT_STATE_STARTING 0
+#define VSYNC_CONTEXT_STATE_RUNNING 1
+#define VSYNC_CONTEXT_STATE_STOPPING 2
+#define VSYNC_CONTEXT_STATE_STOPPED 3
+
+typedef struct
+{
+  const HWND hwnd;
+  int state;
+  const char *error;
+  CRITICAL_SECTION critical_section;
+} vsync_context;
 
 typedef struct
 {
@@ -268,6 +282,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
   }
 
   case WM_SIZE:
+  case WM_APP:
     if (InvalidateRect(hwnd, NULL, FALSE) == 0)
     {
       our_context->error = "Failed to invalidate the window.";
@@ -419,6 +434,53 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
   }
 }
 
+DWORD WINAPI vsync_thread(LPVOID lpParam)
+{
+  vsync_context *const context = (vsync_context *)lpParam;
+  const HWND hwnd = context->hwnd;
+
+  EnterCriticalSection(&context->critical_section);
+
+  if (context->state == VSYNC_CONTEXT_STATE_STARTING)
+  {
+    context->state = VSYNC_CONTEXT_STATE_RUNNING;
+
+    while (context->state == VSYNC_CONTEXT_STATE_RUNNING)
+    {
+      LeaveCriticalSection(&context->critical_section);
+
+      if (DwmFlush() == S_OK)
+      {
+        if (SendMessage(hwnd, WM_APP, 0, 0))
+        {
+          // NOTE: As far as is known, this can only happen if the window
+          //       unexpectedly closes, in which case, the main thread will
+          //       already be awaiting our exit.
+          //       In any other scenario which hits this branch, the application
+          //       will freeze until the next window message (e.g. mouse input).
+          EnterCriticalSection(&context->critical_section);
+          context->error = "Failed to notify the window that it needs to re-draw.";
+          break;
+        }
+        else
+        {
+          EnterCriticalSection(&context->critical_section);
+        }
+      }
+      else
+      {
+        EnterCriticalSection(&context->critical_section);
+        context->error = "Failed to wait for vertical sync.";
+        break;
+      }
+    }
+  }
+
+  context->state = VSYNC_CONTEXT_STATE_STOPPED;
+  LeaveCriticalSection(&context->critical_section);
+  return 0;
+}
+
 const char *run_event_loop(
     const char *const title,
     const int ticks_per_second,
@@ -435,8 +497,8 @@ const char *run_event_loop(
     const int nCmdShow)
 {
   // We need a minimum of two buffers.
-  // We also need a minimum of enough buffers for 200msec in my experience.
-  int buffers = ((int)ceil(max(1, 1.0 / 5 / (1.0 / ticks_per_second)))) + 1;
+  // We also need a minimum of enough buffers for 100msec in my experience.
+  int buffers = ((int)ceil(max(1, 1.0 / 10 / (1.0 / ticks_per_second)))) + 1;
 
   context context = {
       .ticks_per_second = ticks_per_second,
@@ -904,11 +966,167 @@ const char *run_event_loop(
     wavehdr++;
   }
 
+  vsync_context vc = {
+      .hwnd = hwnd,
+      .state = VSYNC_CONTEXT_STATE_STARTING,
+      .error = NULL};
+
+  InitializeCriticalSection(&vc.critical_section);
+
+  CreateThread(NULL, 0, vsync_thread, &vc, 0, NULL);
+
   ShowWindow(hwnd, nCmdShow);
 
   if (waveOutRestart(context.hwaveout) != MMSYSERR_NOERROR)
   {
-    if (waveOutReset(context.hwaveout) == MMSYSERR_NOERROR)
+    EnterCriticalSection(&vc.critical_section);
+
+    if (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+    {
+      vc.state = VSYNC_CONTEXT_STATE_STOPPING;
+
+      while (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+      {
+        LeaveCriticalSection(&vc.critical_section);
+
+        Sleep(10);
+
+        EnterCriticalSection(&vc.critical_section);
+      }
+    }
+
+    LeaveCriticalSection(&vc.critical_section);
+    DeleteCriticalSection(&vc.critical_section);
+
+    if (vc.error == NULL)
+    {
+      if (waveOutReset(context.hwaveout) == MMSYSERR_NOERROR)
+      {
+        if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
+        {
+          if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to unregister the window class.";
+            }
+          }
+          else
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to destroy the window.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to destroy the window and unregister the window class.";
+            }
+          }
+        }
+        else
+        {
+          if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to close wave out.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to close wave out and unregister the window class.";
+            }
+          }
+          else
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to close wave out and destroy the window.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to close wave out, destroy the window and unregister the window class.";
+            }
+          }
+        }
+      }
+      else
+      {
+        // In the event this fails, we can't unprepare wave outs safely.
+        // The process is probably about to close in any case.
+
+        if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
+        {
+          if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out and unregister the window class.";
+            }
+          }
+          else
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out and destroy the window.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out, destroy the window and unregister the window class.";
+            }
+          }
+        }
+        else
+        {
+          if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out and close wave out.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out and unregister the window class.";
+            }
+          }
+          else
+          {
+            free(context.scratch);
+
+            if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out and destroy the window.";
+            }
+            else
+            {
+              return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out, destroy the window and unregister the window class.";
+            }
+          }
+        }
+      }
+    }
+    else if (waveOutReset(context.hwaveout) == MMSYSERR_NOERROR)
     {
       if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
       {
@@ -918,11 +1136,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.";
+            return "Failed to restart wave out.  An error additionally occurred in the vsync thread.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread and while unregistering the window class.";
           }
         }
         else
@@ -931,11 +1149,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to destroy the window.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread and while destroying the window.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to destroy the window and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while destroying the window and unregistering the window class.";
           }
         }
       }
@@ -947,11 +1165,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to close wave out.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread and while closing wave out.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to close wave out and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while closing wave out and unregistering the window class.";
           }
         }
         else
@@ -960,11 +1178,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to close wave out and destroy the window.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while closing wave out and destroying the window.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to close wave out, destroy the window and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while closing wave out, destroying the window and unregistering the window class.";
           }
         }
       }
@@ -982,11 +1200,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread and while resetting wave out.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while restting wave out and unregistering the window class.";
           }
         }
         else
@@ -995,11 +1213,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out and destroy the window.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while resetting wave out and destroying the window.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out, destroy the window and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while resetting wave out, destroying the window and unregistering the window class.";
           }
         }
       }
@@ -1011,11 +1229,11 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out and close wave out.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while resetting wave out and closing wave out.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while restting wave out, closing wave out and unregistering the window class.";
           }
         }
         else
@@ -1024,42 +1242,25 @@ const char *run_event_loop(
 
           if (UnregisterClass(wc.lpszClassName, wc.hInstance))
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out and destroy the window.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while retting wave out, closing wave out and destroying the window.";
           }
           else
           {
-            return "Failed to restart wave out.  Additionally failed to reset wave out, close wave out, destroy the window and unregister the window class.";
+            return "Failed to restart wave out.  Errors additionally occurred in the vsync thread, while resetting wave out, closing wave out, destroing the window and unregistering the window class.";
           }
         }
       }
     }
   }
 
-  bool running = true;
-
-  while (running && context.error == NULL)
+  while (context.error == NULL)
   {
     MSG msg;
 
-    while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE))
+    while (GetMessage(&msg, hwnd, 0, 0))
     {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
-    }
-
-    if (running && context.error == NULL)
-    {
-      if (DwmFlush() == S_OK)
-      {
-        if (InvalidateRect(hwnd, NULL, FALSE) == 0)
-        {
-          context.error = "Failed to invalidate the window.";
-        }
-      }
-      else
-      {
-        context.error = "Failed to wait for vertical sync.";
-      }
     }
   }
 
@@ -1068,7 +1269,87 @@ const char *run_event_loop(
     // In the event this fails, we can't unprepare wave outs safely.
     // The process is probably about to close in any case.
 
-    if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
+    EnterCriticalSection(&vc.critical_section);
+
+    if (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+    {
+      vc.state = VSYNC_CONTEXT_STATE_STOPPING;
+
+      while (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+      {
+        LeaveCriticalSection(&vc.critical_section);
+
+        Sleep(10);
+
+        EnterCriticalSection(&vc.critical_section);
+      }
+    }
+
+    LeaveCriticalSection(&vc.critical_section);
+    DeleteCriticalSection(&vc.critical_section);
+
+    if (vc.error == NULL)
+    {
+      if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
+      {
+        if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+        {
+          free(context.scratch);
+
+          if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+          {
+            return "Failed to reset wave out.";
+          }
+          else
+          {
+            return "Failed to reset wave out.  Additionally failed to unregister the window class.";
+          }
+        }
+        else
+        {
+          free(context.scratch);
+
+          if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+          {
+            return "Failed to reset wave out.  Additionally failed to destroy the window.";
+          }
+          else
+          {
+            return "Failed to reset wave out.  Additionally failed to destroy the window and unregister the window class.";
+          }
+        }
+      }
+      else
+      {
+        if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+        {
+          free(context.scratch);
+
+          if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+          {
+            return "Failed to reset wave out.  Additionally failed to close wave out.";
+          }
+          else
+          {
+            return "Failed to reset wave out.  Additionally failed to close wave out and unregister the window class.";
+          }
+        }
+        else
+        {
+          free(context.scratch);
+
+          if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+          {
+            return "Failed to reset wave out.  Additionally failed to close wave out and destroy the window.";
+          }
+          else
+          {
+            return "Failed to reset wave out.  Additionally failed to close wave out, destroy the window and unregister the window class.";
+          }
+        }
+      }
+    }
+    else if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
     {
       if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
       {
@@ -1076,11 +1357,11 @@ const char *run_event_loop(
 
         if (UnregisterClass(wc.lpszClassName, wc.hInstance))
         {
-          return "Failed to reset wave out.";
+          return "Failed to reset wave out.  An error additionally occurred in the vsync thread.";
         }
         else
         {
-          return "Failed to reset wave out.  Additionally failed to unregister the window class.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread and while unregistering the window class.";
         }
       }
       else
@@ -1089,11 +1370,11 @@ const char *run_event_loop(
 
         if (UnregisterClass(wc.lpszClassName, wc.hInstance))
         {
-          return "Failed to reset wave out.  Additionally failed to destroy the window.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread and while destroying the window.";
         }
         else
         {
-          return "Failed to reset wave out.  Additionally failed to destroy the window and unregister the window class.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread, while destroying the window and unregistering the window class.";
         }
       }
     }
@@ -1105,11 +1386,11 @@ const char *run_event_loop(
 
         if (UnregisterClass(wc.lpszClassName, wc.hInstance))
         {
-          return "Failed to reset wave out.  Additionally failed to close wave out.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread and while closing wave out.";
         }
         else
         {
-          return "Failed to reset wave out.  Additionally failed to close wave out and unregister the window class.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread, while cling wave out and unregistering the window class.";
         }
       }
       else
@@ -1118,11 +1399,67 @@ const char *run_event_loop(
 
         if (UnregisterClass(wc.lpszClassName, wc.hInstance))
         {
-          return "Failed to reset wave out.  Additionally failed to close wave out and destroy the window.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread, while closing wave out and destroying the window.";
         }
         else
         {
-          return "Failed to reset wave out.  Additionally failed to close wave out, destroy the window and unregister the window class.";
+          return "Failed to reset wave out.  Errors additionally occurred in the vsync thread, while closing wave out, destroying the window and unregistering the window class.";
+        }
+      }
+    }
+  }
+
+  EnterCriticalSection(&vc.critical_section);
+
+  if (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+  {
+    vc.state = VSYNC_CONTEXT_STATE_STOPPING;
+
+    while (vc.state != VSYNC_CONTEXT_STATE_STOPPED)
+    {
+      LeaveCriticalSection(&vc.critical_section);
+
+      Sleep(10);
+
+      EnterCriticalSection(&vc.critical_section);
+    }
+  }
+
+  LeaveCriticalSection(&vc.critical_section);
+  DeleteCriticalSection(&vc.critical_section);
+
+  if (vc.error != NULL)
+  {
+    if (waveOutClose(context.hwaveout) == MMSYSERR_NOERROR)
+    {
+      return vc.error;
+    }
+    else
+    {
+      if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
+      {
+        free(context.scratch);
+
+        if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+        {
+          return "An error occurred in the vsync thread.  Additionally failed to close wave out.";
+        }
+        else
+        {
+          return "An error occurred in the vsync thread.  Additionally failed to close wave out and unregister the window class.";
+        }
+      }
+      else
+      {
+        free(context.scratch);
+
+        if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+        {
+          return "An error occurred in the vsync thread.  Additionally failed to close wave out and destroy the window.";
+        }
+        else
+        {
+          return "An error occurred in the vsync thread.  Additionally failed to close wave out, destroy the window and unregister the window class.";
         }
       }
     }
