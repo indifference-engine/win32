@@ -5,9 +5,9 @@ Win32 application host.
 ## Usage
 
 Your application's build pipeline will need to be configured to compile each C
-file in the [src](./src) directory and recompile every C file should any H files
-change.  Then, include each H file in the same directory to make its
-corresponding function available.
+file in the [src/library](./src/library) directory and recompile every C file
+should any H files change.  Then, include each H file in the same directory to
+make its corresponding function available.
 
 ### Assumptions
 
