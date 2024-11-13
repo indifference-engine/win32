@@ -26,6 +26,7 @@ typedef struct
   void (*const tick)();
   const int rows;
   const int columns;
+  const int skipped_bytes_per_row;
   const float *const reds;
   const float *const greens;
   const float *const blues;
@@ -69,7 +70,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     const int buffers = our_context->buffers;
     HWAVEOUT hwaveout = our_context->hwaveout;
 
-    float *const start_of_buffers = (float *)(((uint8_t *)our_context->scratch) + our_context->rows * our_context->columns * 3);
+    float *const start_of_buffers = (float *)(((uint8_t *)our_context->scratch) + our_context->rows * (our_context->columns * 3 + our_context->skipped_bytes_per_row));
     float *buffer = start_of_buffers + samples_per_tick * 2 * next_buffer;
     const float *left = our_context->left;
     const float *right = our_context->right;
@@ -167,19 +168,26 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
     const int rows = our_context->rows;
     const int columns = our_context->columns;
+    const int skipped_bytes_per_row = our_context->skipped_bytes_per_row;
     const float *const reds = our_context->reds;
     const float *const greens = our_context->greens;
     const float *const blues = our_context->blues;
     uint8_t *const pixels = our_context->scratch;
 
-    const int total = rows * columns;
+    int input = 0;
     int output = 0;
 
-    for (int input = 0; input < total; input++)
+    for (int row = 0; row < rows; row++)
+    {
+      for (int column = 0; column < columns; column++)
     {
       pixels[output++] = blues[input] * 255.0f;
       pixels[output++] = greens[input] * 255.0f;
       pixels[output++] = reds[input] * 255.0f;
+        input++;
+      }
+
+      output += skipped_bytes_per_row;
     }
 
     BITMAPINFO bitmapinfo = {.bmiHeader = {
@@ -500,11 +508,14 @@ const char *run_event_loop(
   // We also need a minimum of enough buffers for 100msec in my experience.
   int buffers = ((int)ceil(max(1, 1.0 / 10 / (1.0 / ticks_per_second)))) + 1;
 
+  const int bytes_per_row = GDI_WIDTHBYTES(columns * 24);
+
   context context = {
       .ticks_per_second = ticks_per_second,
       .tick = tick,
       .rows = rows,
       .columns = columns,
+      .skipped_bytes_per_row = bytes_per_row - (columns * 3),
       .reds = reds,
       .greens = greens,
       .blues = blues,
@@ -513,7 +524,7 @@ const char *run_event_loop(
       .left = left,
       .right = right,
       .error = NULL,
-      .scratch = malloc(sizeof(uint8_t) * rows * columns * 3 + sizeof(float) * 2 * buffers * samples_per_tick + sizeof(WAVEHDR) * buffers),
+      .scratch = malloc(sizeof(uint8_t) * rows * bytes_per_row + sizeof(float) * 2 * buffers * samples_per_tick + sizeof(WAVEHDR) * buffers),
       .next_buffer = 0,
       .buffers = buffers,
       .minimum_position = 0,
@@ -680,7 +691,7 @@ const char *run_event_loop(
     }
   }
 
-  float *buffer = (float *)(((uint8_t *)context.scratch) + rows * columns * 3);
+  float *buffer = (float *)(((uint8_t *)context.scratch) + rows * bytes_per_row);
   WAVEHDR *const first_wavehdr = (WAVEHDR *)(buffer + buffers * samples_per_tick * 2);
   WAVEHDR *wavehdr = first_wavehdr;
 
