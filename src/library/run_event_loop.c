@@ -23,14 +23,14 @@ typedef struct
 typedef struct
 {
   const int ticks_per_second;
-  void (*const tick)();
+  void (*const tick)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code));
   const int rows;
   const int columns;
   const int skipped_bytes_per_row;
   const float *const reds;
   const float *const greens;
   const float *const blues;
-  void (*const video)(const float tick_progress_unit_interval);
+  void (*const video)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval);
   const int samples_per_tick;
   const float *const left;
   const float *const right;
@@ -40,7 +40,26 @@ typedef struct
   int next_buffer;
   const int buffers;
   DWORD minimum_position;
+  WPARAM *held_virtual_key_codes;
+  int number_of_held_virtual_key_codes;
 } context;
+
+static bool key_held(const void *const _context, const WPARAM virtual_key_code)
+{
+  const context *const our_context = (context *)_context;
+  const int number_of_held_virtual_key_codes = our_context->number_of_held_virtual_key_codes;
+  const WPARAM *const held_virtual_key_codes = our_context->held_virtual_key_codes;
+
+  for (int index = 0; index < number_of_held_virtual_key_codes; index++)
+  {
+    if (virtual_key_code == held_virtual_key_codes[index])
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -83,7 +102,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
-    our_context->tick();
+    our_context->tick(our_context, key_held);
 
     for (int index = 0; index < samples_per_tick; index++)
     {
@@ -164,7 +183,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     const DWORD position = mmtime.u.sample;
     const DWORD elapsed = position < minimum_position ? position + ((4294967295 - minimum_position) + 1) : position - minimum_position;
 
-    our_context->video(max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
+    our_context->video(our_context, key_held, max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
 
     const int rows = our_context->rows;
     const int columns = our_context->columns;
@@ -180,10 +199,10 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     for (int row = 0; row < rows; row++)
     {
       for (int column = 0; column < columns; column++)
-    {
-      pixels[output++] = blues[input] * 255.0f;
-      pixels[output++] = greens[input] * 255.0f;
-      pixels[output++] = reds[input] * 255.0f;
+      {
+        pixels[output++] = blues[input] * 255.0f;
+        pixels[output++] = greens[input] * 255.0f;
+        pixels[output++] = reds[input] * 255.0f;
         input++;
       }
 
@@ -434,6 +453,67 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     }
   }
 
+  case WM_KEYDOWN:
+  {
+    const int number_of_held_virtual_key_codes = our_context->number_of_held_virtual_key_codes;
+    WPARAM *held_virtual_key_codes = our_context->held_virtual_key_codes;
+
+    for (int index = 0; index < number_of_held_virtual_key_codes; index++)
+    {
+      if (held_virtual_key_codes[index] == wParam)
+      {
+        return 0;
+      }
+    }
+
+    if (number_of_held_virtual_key_codes)
+    {
+      held_virtual_key_codes = realloc(held_virtual_key_codes, sizeof(WPARAM) * (number_of_held_virtual_key_codes + 1));
+      held_virtual_key_codes[number_of_held_virtual_key_codes] = wParam;
+      our_context->held_virtual_key_codes = held_virtual_key_codes;
+      our_context->number_of_held_virtual_key_codes = number_of_held_virtual_key_codes + 1;
+    }
+    else
+    {
+      held_virtual_key_codes = malloc(sizeof(WPARAM));
+      held_virtual_key_codes[0] = wParam;
+      our_context->held_virtual_key_codes = held_virtual_key_codes;
+      our_context->number_of_held_virtual_key_codes = 1;
+    }
+
+    return 0;
+  }
+
+  case WM_KEYUP:
+  {
+    const int number_of_held_virtual_key_codes = our_context->number_of_held_virtual_key_codes;
+    WPARAM *held_virtual_key_codes = our_context->held_virtual_key_codes;
+
+    for (int index = 0; index < number_of_held_virtual_key_codes; index++)
+    {
+      if (held_virtual_key_codes[index] == wParam)
+      {
+        if (number_of_held_virtual_key_codes == 1)
+        {
+          free(held_virtual_key_codes);
+          our_context->held_virtual_key_codes = NULL;
+          our_context->number_of_held_virtual_key_codes = 0;
+        }
+        else
+        {
+          memmove(held_virtual_key_codes + index, held_virtual_key_codes + index + 1, sizeof(WPARAM) * (number_of_held_virtual_key_codes - index - 1));
+          held_virtual_key_codes = realloc(held_virtual_key_codes, sizeof(WPARAM) * (number_of_held_virtual_key_codes - 1));
+          our_context->held_virtual_key_codes = held_virtual_key_codes;
+          our_context->number_of_held_virtual_key_codes = number_of_held_virtual_key_codes - 1;
+        }
+
+        break;
+      }
+    }
+
+    return 0;
+  }
+
   case WM_DESTROY:
     exit(0);
 
@@ -492,13 +572,13 @@ DWORD WINAPI vsync_thread(LPVOID lpParam)
 const char *run_event_loop(
     const char *const title,
     const int ticks_per_second,
-    void (*const tick)(),
+    void (*const tick)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code)),
     const int rows,
     const int columns,
     const float *const reds,
     const float *const greens,
     const float *const blues,
-    void (*const video)(const float tick_progress_unit_interval),
+    void (*const video)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval),
     const int samples_per_tick,
     const float *const left,
     const float *const right,
@@ -528,6 +608,8 @@ const char *run_event_loop(
       .next_buffer = 0,
       .buffers = buffers,
       .minimum_position = 0,
+      .held_virtual_key_codes = NULL,
+      .number_of_held_virtual_key_codes = 0,
   };
 
   if (context.scratch == NULL)
@@ -697,7 +779,7 @@ const char *run_event_loop(
 
   for (int buffer_index = 0; buffer_index < buffers; buffer_index++)
   {
-    tick();
+    tick(&context, key_held);
 
     wavehdr->lpData = (LPSTR)buffer;
     wavehdr->dwBufferLength = samples_per_tick * 2 * sizeof(float);

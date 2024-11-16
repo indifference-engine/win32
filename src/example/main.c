@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <math.h>
 #include "../library/run_event_loop.h"
 
@@ -29,12 +30,12 @@ static float calculate_y(const int ticks)
   return (sin(ticks * 0.12) * 0.1 + 0.5) * ROWS;
 }
 
-static void tick()
+static void tick(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code))
 {
   previous_x = next_x;
   next_x = calculate_x(ticks);
   previous_y = next_y;
-  next_y = calculate_y(ticks);
+  next_y = calculate_y(ticks) + (key_held(context, 87) ? 50.0f : 0.0f) - (key_held(context, 83) ? 50.0f : 0.0f);
   ticks++;
 
   for (int sample = 0; sample < SAMPLES_PER_TICK; sample++)
@@ -55,7 +56,7 @@ static float linear_interpolate(const float from, const float to, const float pr
 
 static int video_calls = 0;
 
-static void video(const float tick_progress_unit_interval)
+static void video(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval)
 {
   for (int row = 0; row < ROWS; row++)
   {
@@ -77,7 +78,7 @@ static void video(const float tick_progress_unit_interval)
     for (int column = x - 2; column < x + 2; column++)
     {
       reds[row * COLUMNS + column] = 1;
-      greens[row * COLUMNS + column] = 0;
+      greens[row * COLUMNS + column] = key_held(context, VK_SPACE) ? 1 : 0;
       blues[row * COLUMNS + column] = 1;
     }
   }

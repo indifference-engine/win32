@@ -2,6 +2,9 @@
 
 #define RUN_EVENT_LOOP_H
 
+#include <stdbool.h>
+#include <windows.h>
+
 /**
  * Runs an application event loop, blocking until the window is closed by the
  * user or an error occurs.
@@ -40,13 +43,13 @@
 const char *run_event_loop(
     const char *const title,
     const int ticks_per_second,
-    void (*const tick)(),
+    void (*const tick)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code)),
     const int rows,
     const int columns,
     const float *const reds,
     const float *const greens,
     const float *const blues,
-    void (*const video)(const float tick_progress_unit_interval),
+    void (*const video)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval),
     const int samples_per_tick,
     const float *const left,
     const float *const right,
