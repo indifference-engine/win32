@@ -92,5 +92,6 @@ example application is included.  This can be found at
 - Make.
 - MinGW-GCC.
 - Bash.
-- Must be linked to the `dwmapi` library.
-- Must be linked to the `winmm` library.
+- The `dwmapi` library.
+- The `winmm` library.
+- Find.
