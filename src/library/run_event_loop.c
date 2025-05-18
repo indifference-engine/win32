@@ -42,6 +42,12 @@ typedef struct
   DWORD minimum_position;
   WPARAM *held_virtual_key_codes;
   int number_of_held_virtual_key_codes;
+  int scaled_width;
+  int scaled_height;
+  int x_offset;
+  int y_offset;
+  int inverse_x_offset;
+  int inverse_y_offset;
 } context;
 
 static bool key_held(const void *const _context, const WPARAM virtual_key_code)
@@ -59,6 +65,25 @@ static bool key_held(const void *const _context, const WPARAM virtual_key_code)
   }
 
   return false;
+}
+
+static void recalculate_scaling(context *const context, const int width, const int height)
+{
+  const int columns = context->columns;
+  const int rows = context->rows;
+  const double x_scale = (double)width / columns;
+  const double y_scale = (double)height / rows;
+  const double scale = x_scale < y_scale ? x_scale : y_scale;
+  const int scaled_width = columns * scale;
+  context->scaled_width = scaled_width;
+  const int scaled_height = rows * scale;
+  context->scaled_height = scaled_height;
+  const int x_offset = (width - scaled_width) / 2;
+  context->x_offset = x_offset;
+  const int y_offset = (height - scaled_height) / 2;
+  context->y_offset = y_offset;
+  context->inverse_x_offset = width - scaled_width - x_offset;
+  context->inverse_y_offset = height - scaled_height - y_offset;
 }
 
 static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -223,16 +248,6 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                                  0,
                              }};
 
-    const int destination_width = client_rect.right - client_rect.left;
-    const int destination_height = client_rect.bottom - client_rect.top;
-    const double x_scale = (double)destination_width / columns;
-    const double y_scale = (double)destination_height / rows;
-    const double scale = x_scale < y_scale ? x_scale : y_scale;
-    const int scaled_width = columns * scale;
-    const int scaled_height = rows * scale;
-    const int x_offset = (destination_width - scaled_width) / 2;
-    const int y_offset = (destination_height - scaled_height) / 2;
-
     if (SelectObject(hdc, GetStockObject(NULL_PEN)) == NULL)
     {
       our_context->error = "Failed to set the pen.";
@@ -245,6 +260,15 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
+    const int x_offset = our_context->x_offset;
+    const int scaled_width = our_context->scaled_width;
+    const int inverse_x_offset = our_context->inverse_x_offset;
+    const int destination_width = x_offset + scaled_width + inverse_x_offset;
+    const int y_offset = our_context->y_offset;
+    const int scaled_height = our_context->scaled_height;
+    const int inverse_y_offset = our_context->inverse_y_offset;
+    const int destination_height = y_offset + scaled_height + inverse_y_offset;
+
     if (x_offset > 0)
     {
       if (!Rectangle(hdc, 0, 0, x_offset, destination_height))
@@ -253,8 +277,6 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
     }
-
-    const int inverse_x_offset = destination_width - x_offset - scaled_width;
 
     if (inverse_x_offset > 0)
     {
@@ -273,8 +295,6 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
     }
-
-    const int inverse_y_offset = destination_height - y_offset - scaled_height;
 
     if (inverse_y_offset > 0)
     {
@@ -309,6 +329,14 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
   }
 
   case WM_SIZE:
+    recalculate_scaling(our_context, LOWORD(lParam), HIWORD(lParam));
+
+    if (InvalidateRect(hwnd, NULL, FALSE) == 0)
+    {
+      our_context->error = "Failed to invalidate the window.";
+    }
+    return 0;
+
   case WM_APP:
     if (InvalidateRect(hwnd, NULL, FALSE) == 0)
     {
@@ -610,6 +638,12 @@ const char *run_event_loop(
       .minimum_position = 0,
       .held_virtual_key_codes = NULL,
       .number_of_held_virtual_key_codes = 0,
+      .scaled_width = columns,
+      .scaled_height = rows,
+      .x_offset = 0,
+      .y_offset = 0,
+      .inverse_x_offset = 0,
+      .inverse_y_offset = 0,
   };
 
   if (context.scratch == NULL)
