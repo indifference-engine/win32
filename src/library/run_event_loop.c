@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <windows.h>
+#include <windowsx.h>
 #include <dwmapi.h>
 #include <mmreg.h>
 #include <math.h>
@@ -23,14 +24,14 @@ typedef struct
 typedef struct
 {
   const int ticks_per_second;
-  void (*const tick)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code));
+  void (*const tick)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code));
   const int rows;
   const int columns;
   const int skipped_bytes_per_row;
   const float *const reds;
   const float *const greens;
   const float *const blues;
-  void (*const video)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval);
+  void (*const video)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval);
   const int samples_per_tick;
   const float *const left;
   const float *const right;
@@ -48,6 +49,9 @@ typedef struct
   int y_offset;
   int inverse_x_offset;
   int inverse_y_offset;
+  int pointer_state;
+  float pointer_row;
+  float pointer_column;
 } context;
 
 static bool key_held(const void *const _context, const WPARAM virtual_key_code)
@@ -127,7 +131,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
-    our_context->tick(our_context, key_held);
+    our_context->tick(our_context, our_context->pointer_state, our_context->pointer_row, our_context->pointer_column, key_held);
 
     for (int index = 0; index < samples_per_tick; index++)
     {
@@ -180,13 +184,6 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
-    RECT client_rect;
-    if (!GetClientRect(hwnd, &client_rect))
-    {
-      our_context->error = "Failed to get the area to paint.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-
     MMTIME mmtime = {.wType = TIME_SAMPLES};
 
     if (waveOutGetPosition(our_context->hwaveout, &mmtime, sizeof(mmtime)) != MMSYSERR_NOERROR)
@@ -208,7 +205,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     const DWORD position = mmtime.u.sample;
     const DWORD elapsed = position < minimum_position ? position + ((4294967295 - minimum_position) + 1) : position - minimum_position;
 
-    our_context->video(our_context, key_held, max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
+    our_context->video(our_context, our_context->pointer_state, our_context->pointer_row, our_context->pointer_column, key_held, max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
 
     const int rows = our_context->rows;
     const int columns = our_context->columns;
@@ -542,6 +539,40 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     return 0;
   }
 
+  case WM_MOUSEMOVE:
+  case WM_LBUTTONDOWN:
+  case WM_LBUTTONUP:
+  {
+    const int x = GET_X_LPARAM(lParam);
+    const int y = GET_Y_LPARAM(lParam);
+    our_context->pointer_state = wParam & MK_LBUTTON ? POINTER_STATE_SELECT : POINTER_STATE_HOVER;
+    our_context->pointer_row = ((float)((y - our_context->y_offset) * our_context->rows)) / ((float)our_context->scaled_height);
+    our_context->pointer_column = ((float)((x - our_context->x_offset) * our_context->columns)) / ((float)our_context->scaled_width);
+
+    TRACKMOUSEEVENT event_track = {
+        .cbSize = sizeof(TRACKMOUSEEVENT),
+        .dwFlags = TME_LEAVE,
+        .hwndTrack = hwnd,
+        .dwHoverTime = HOVER_DEFAULT,
+    };
+
+    if (TrackMouseEvent(&event_track))
+    {
+      return 0;
+    }
+    else
+    {
+      our_context->error = "Failed to track the mouse.";
+      return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+  }
+
+  case WM_MOUSELEAVE:
+  {
+    our_context->pointer_state = POINTER_STATE_NONE;
+    return 0;
+  }
+
   case WM_DESTROY:
     exit(0);
 
@@ -600,13 +631,13 @@ DWORD WINAPI vsync_thread(LPVOID lpParam)
 const char *run_event_loop(
     const char *const title,
     const int ticks_per_second,
-    void (*const tick)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code)),
+    void (*const tick)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code)),
     const int rows,
     const int columns,
     const float *const reds,
     const float *const greens,
     const float *const blues,
-    void (*const video)(const void *const context, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval),
+    void (*const video)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval),
     const int samples_per_tick,
     const float *const left,
     const float *const right,
@@ -644,6 +675,9 @@ const char *run_event_loop(
       .y_offset = 0,
       .inverse_x_offset = 0,
       .inverse_y_offset = 0,
+      .pointer_state = POINTER_STATE_NONE,
+      .pointer_row = 0.0f,
+      .pointer_column = 0.0f,
   };
 
   if (context.scratch == NULL)
@@ -813,7 +847,7 @@ const char *run_event_loop(
 
   for (int buffer_index = 0; buffer_index < buffers; buffer_index++)
   {
-    tick(&context, key_held);
+    tick(&context, POINTER_STATE_NONE, 0, 0, key_held);
 
     wavehdr->lpData = (LPSTR)buffer;
     wavehdr->dwBufferLength = samples_per_tick * 2 * sizeof(float);
