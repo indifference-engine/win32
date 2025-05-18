@@ -573,7 +573,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     return handle_mouse_event(hwnd, uMsg, wParam, lParam, our_context);
 
   case WM_LBUTTONUP:
-    if (ReleaseCapture() == 0)
+    if (ReleaseCapture())
     {
       return handle_mouse_event(hwnd, uMsg, wParam, lParam, our_context);
     }
