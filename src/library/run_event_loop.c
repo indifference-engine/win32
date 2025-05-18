@@ -590,6 +590,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
   }
 
   case WM_DESTROY:
+    // TODO: We should have a more graceful exit than this.
     exit(0);
 
   default:
