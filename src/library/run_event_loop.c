@@ -1438,6 +1438,11 @@ const char *run_event_loop(
     {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
+
+      if (context.error != NULL)
+      {
+        break;
+      }
     }
   }
 
@@ -1596,7 +1601,16 @@ const char *run_event_loop(
     {
       LeaveCriticalSection(&vc.critical_section);
 
+      MSG msg;
+      if (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE))
+      {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+      }
+      else
+      {
       Sleep(10);
+      }
 
       EnterCriticalSection(&vc.critical_section);
     }
