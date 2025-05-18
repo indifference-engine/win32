@@ -90,6 +90,32 @@ static void recalculate_scaling(context *const context, const int width, const i
   context->inverse_y_offset = height - scaled_height - y_offset;
 }
 
+static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg, const WPARAM wParam, const LPARAM lParam, context *const context)
+{
+  const int x = GET_X_LPARAM(lParam);
+  const int y = GET_Y_LPARAM(lParam);
+  context->pointer_state = wParam & MK_LBUTTON ? POINTER_STATE_SELECT : POINTER_STATE_HOVER;
+  context->pointer_row = ((float)((y - context->y_offset) * context->rows)) / ((float)context->scaled_height);
+  context->pointer_column = ((float)((x - context->x_offset) * context->columns)) / ((float)context->scaled_width);
+
+  TRACKMOUSEEVENT event_track = {
+      .cbSize = sizeof(TRACKMOUSEEVENT),
+      .dwFlags = TME_LEAVE,
+      .hwndTrack = hwnd,
+      .dwHoverTime = HOVER_DEFAULT,
+  };
+
+  if (TrackMouseEvent(&event_track))
+  {
+    return 0;
+  }
+  else
+  {
+    context->error = "Failed to track the mouse.";
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+  }
+}
+
 static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   if (uMsg == WM_CREATE)
@@ -539,33 +565,23 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     return 0;
   }
 
-  case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN:
+    SetCapture(hwnd);
+    return handle_mouse_event(hwnd, uMsg, wParam, lParam, our_context);
+
+  case WM_MOUSEMOVE:
+    return handle_mouse_event(hwnd, uMsg, wParam, lParam, our_context);
+
   case WM_LBUTTONUP:
-  {
-    const int x = GET_X_LPARAM(lParam);
-    const int y = GET_Y_LPARAM(lParam);
-    our_context->pointer_state = wParam & MK_LBUTTON ? POINTER_STATE_SELECT : POINTER_STATE_HOVER;
-    our_context->pointer_row = ((float)((y - our_context->y_offset) * our_context->rows)) / ((float)our_context->scaled_height);
-    our_context->pointer_column = ((float)((x - our_context->x_offset) * our_context->columns)) / ((float)our_context->scaled_width);
-
-    TRACKMOUSEEVENT event_track = {
-        .cbSize = sizeof(TRACKMOUSEEVENT),
-        .dwFlags = TME_LEAVE,
-        .hwndTrack = hwnd,
-        .dwHoverTime = HOVER_DEFAULT,
-    };
-
-    if (TrackMouseEvent(&event_track))
+    if (ReleaseCapture() == 0)
     {
-      return 0;
+      return handle_mouse_event(hwnd, uMsg, wParam, lParam, our_context);
     }
     else
     {
-      our_context->error = "Failed to track the mouse.";
+      our_context->error = "Failed to release the capture of the mouse.";
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
-  }
 
   case WM_MOUSELEAVE:
   {
