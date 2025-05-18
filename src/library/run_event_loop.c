@@ -71,25 +71,6 @@ static bool key_held(const void *const _context, const WPARAM virtual_key_code)
   return false;
 }
 
-static void recalculate_scaling(context *const context, const int width, const int height)
-{
-  const int columns = context->columns;
-  const int rows = context->rows;
-  const double x_scale = (double)width / columns;
-  const double y_scale = (double)height / rows;
-  const double scale = x_scale < y_scale ? x_scale : y_scale;
-  const int scaled_width = columns * scale;
-  context->scaled_width = scaled_width;
-  const int scaled_height = rows * scale;
-  context->scaled_height = scaled_height;
-  const int x_offset = (width - scaled_width) / 2;
-  context->x_offset = x_offset;
-  const int y_offset = (height - scaled_height) / 2;
-  context->y_offset = y_offset;
-  context->inverse_x_offset = width - scaled_width - x_offset;
-  context->inverse_y_offset = height - scaled_height - y_offset;
-}
-
 static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg, const WPARAM wParam, const LPARAM lParam, context *const context)
 {
   const int x = GET_X_LPARAM(lParam);
@@ -352,13 +333,32 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam, LP
   }
 
   case WM_SIZE:
-    recalculate_scaling(our_context, LOWORD(lParam), HIWORD(lParam));
+  {
+    const int width = LOWORD(lParam);
+    const int height = HIWORD(lParam);
+
+    const int columns = our_context->columns;
+    const int rows = our_context->rows;
+    const double x_scale = (double)width / columns;
+    const double y_scale = (double)height / rows;
+    const double scale = x_scale < y_scale ? x_scale : y_scale;
+    const int scaled_width = columns * scale;
+    our_context->scaled_width = scaled_width;
+    const int scaled_height = rows * scale;
+    our_context->scaled_height = scaled_height;
+    const int x_offset = (width - scaled_width) / 2;
+    our_context->x_offset = x_offset;
+    const int y_offset = (height - scaled_height) / 2;
+    our_context->y_offset = y_offset;
+    our_context->inverse_x_offset = width - scaled_width - x_offset;
+    our_context->inverse_y_offset = height - scaled_height - y_offset;
 
     if (InvalidateRect(hwnd, NULL, FALSE) == 0)
     {
       our_context->error = "Failed to invalidate the window.";
     }
     return 0;
+  }
 
   case WM_APP:
     if (InvalidateRect(hwnd, NULL, FALSE) == 0)
@@ -1609,7 +1609,7 @@ const char *run_event_loop(
       }
       else
       {
-      Sleep(10);
+        Sleep(10);
       }
 
       EnterCriticalSection(&vc.critical_section);
