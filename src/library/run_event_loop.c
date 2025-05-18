@@ -1702,7 +1702,7 @@ const char *run_event_loop(
 
   free(context.scratch);
 
-  if (UnregisterClass(wc.lpszClassName, wc.hInstance))
+  if (!UnregisterClass(wc.lpszClassName, wc.hInstance))
   {
     return "Failed to unregister the window class.";
   }
