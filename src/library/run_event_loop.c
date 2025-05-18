@@ -614,6 +614,8 @@ DWORD WINAPI vsync_thread(LPVOID lpParam)
 
       if (DwmFlush() == S_OK)
       {
+        // TODO: Backpressure; do not send the window this message unless it has
+        //       already acknowledged or processed that previous.
         if (SendMessage(hwnd, WM_APP, 0, 0))
         {
           // NOTE: As far as is known, this can only happen if the window
