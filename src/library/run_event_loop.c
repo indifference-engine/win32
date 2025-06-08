@@ -48,6 +48,8 @@ typedef struct {
   DWORD minimum_position;
   WPARAM *held_virtual_key_codes;
   int number_of_held_virtual_key_codes;
+  int position_x;
+  int position_y;
   int scaled_width;
   int scaled_height;
   int x_offset;
@@ -344,9 +346,11 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     return 0;
   }
 
-  case WM_SIZE: {
-    const int width = LOWORD(lParam);
-    const int height = HIWORD(lParam);
+  case WM_WINDOWPOSCHANGED: {
+    const WINDOWPOS *const windowpos = (const WINDOWPOS *const)lParam;
+
+    const int width = windowpos->cx;
+    const int height = windowpos->cy;
 
     const int columns = our_context->columns;
     const int rows = our_context->rows;
@@ -364,10 +368,12 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     our_context->inverse_x_offset = width - scaled_width - x_offset;
     our_context->inverse_y_offset = height - scaled_height - y_offset;
 
+    our_context->position_x = windowpos->x;
+    our_context->position_y = windowpos->y;
+
     if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
       our_context->error = "Failed to invalidate the window.";
     }
-    return 0;
   }
 
   case WM_APP:
@@ -690,6 +696,8 @@ const char *run_event_loop(
       .minimum_position = 0,
       .held_virtual_key_codes = NULL,
       .number_of_held_virtual_key_codes = 0,
+      .position_x = 0,
+      .position_y = 0,
       .scaled_width = columns,
       .scaled_height = rows,
       .x_offset = 0,
@@ -765,6 +773,33 @@ const char *run_event_loop(
              "the window class.";
     }
   }
+
+  RECT window_rect;
+  if (GetWindowRect(hwnd, &window_rect) == 0) {
+    if (DestroyWindow(hwnd) || GetLastError() == ERROR_INVALID_WINDOW_HANDLE) {
+      free(context.scratch);
+
+      if (UnregisterClass(wc.lpszClassName, wc.hInstance)) {
+        return "Failed to measure the window.";
+      } else {
+        return "Failed to measure the window.  Additionally failed to "
+               "unregister the window class.";
+      }
+    } else {
+      free(context.scratch);
+
+      if (UnregisterClass(wc.lpszClassName, wc.hInstance)) {
+        return "Failed to measure the window.  Additionally failed to destroy "
+               "the window.";
+      } else {
+        return "Failed to measure the window.  Additionally failed to destroy "
+               "the window and unregister the window class.";
+      }
+    }
+  }
+
+  context.position_x = window_rect.left;
+  context.position_y = window_rect.top;
 
   const WAVEFORMATEX wave_format = {
       WAVE_FORMAT_IEEE_FLOAT,
