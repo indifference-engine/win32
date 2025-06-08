@@ -13,7 +13,7 @@ BEGIN
       VALUE "FileDescription", "Example Application"
       VALUE "FileVersion", "1.0"
       VALUE "InternalName", "example"
-      VALUE "LegalCopyright", "Indifference ENgine"
+      VALUE "LegalCopyright", "Indifference Engine"
       VALUE "OriginalFilename", "example.exe"
       VALUE "ProductName", "Example Application"
       VALUE "ProductVersion", "1.0"
