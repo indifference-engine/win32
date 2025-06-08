@@ -57,6 +57,7 @@ typedef struct {
   int pointer_state;
   float pointer_row;
   float pointer_column;
+  bool audio_paused;
 } context;
 
 static bool key_held(const void *const _context,
@@ -186,6 +187,15 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
   }
 
   case WM_PAINT: {
+    if (our_context->audio_paused) {
+      if (waveOutRestart(our_context->hwaveout) != MMSYSERR_NOERROR) {
+        our_context->error = "Failed to restart wave out.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      } else {
+        our_context->audio_paused = false;
+      }
+    }
+
     PAINTSTRUCT paint;
     HDC hdc = BeginPaint(hwnd, &paint);
 
@@ -557,6 +567,21 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
   case WM_MOUSELEAVE: {
     our_context->pointer_state = POINTER_STATE_NONE;
     return 0;
+  }
+
+  case WM_NCLBUTTONDOWN:
+  case WM_NCRBUTTONDOWN: {
+    if ((wParam == HTCAPTION || wParam == HTMAXBUTTON ||
+         wParam == HTMINBUTTON || wParam == HTCLOSE) &&
+        !our_context->audio_paused) {
+      if (waveOutPause(our_context->hwaveout) == MMSYSERR_NOERROR) {
+        our_context->audio_paused = true;
+      } else {
+        our_context->error = "Failed to pause wave out.";
+      }
+    }
+
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
   }
 
   case WM_DESTROY:
