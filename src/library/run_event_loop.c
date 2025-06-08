@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <winuser.h>
 
 #define VSYNC_CONTEXT_STATE_STARTING 0
 #define VSYNC_CONTEXT_STATE_RUNNING 1
@@ -14,6 +15,7 @@
 #define VSYNC_CONTEXT_STATE_STOPPED 3
 
 #define OPAQUE_WS WS_OVERLAPPEDWINDOW
+#define TRANSPARENT_WS (WS_POPUP | WS_THICKFRAME)
 
 typedef struct {
   const HWND hwnd;
@@ -31,6 +33,7 @@ typedef struct {
   const int rows;
   const int columns;
   const int skipped_bytes_per_row;
+  const float *const opacities;
   const float *const reds;
   const float *const greens;
   const float *const blues;
@@ -120,8 +123,21 @@ static const char *video(const context *const context) {
 static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg,
                                   const WPARAM wParam, const LPARAM lParam,
                                   context *const context) {
-  const int x = GET_X_LPARAM(lParam);
-  const int y = GET_Y_LPARAM(lParam);
+  int x = GET_X_LPARAM(lParam);
+  int y = GET_Y_LPARAM(lParam);
+
+  if (context->opacities != NULL) {
+    RECT insets = {0, 0, 0, 0};
+
+    if (AdjustWindowRect(&insets, TRANSPARENT_WS, FALSE)) {
+      x -= insets.left;
+      y -= insets.top;
+    } else {
+      context->error = "Failed to calculate the dimensions of the window.";
+      return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+  }
+
   context->pointer_state =
       wParam & MK_LBUTTON ? POINTER_STATE_SELECT : POINTER_STATE_HOVER;
   context->pointer_row = ((float)((y - context->y_offset) * context->rows)) /
@@ -145,6 +161,359 @@ static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg,
   }
 }
 
+static const char *refresh_layered(const HWND hwnd,
+                                   const context *const context) {
+  const char *const error = video(context);
+
+  if (error != NULL) {
+    return error;
+  }
+
+  const int rows = context->rows;
+  const int y_offset = context->y_offset;
+  const int scaled_height = context->scaled_height;
+  const int position_y = context->position_y;
+  const int columns = context->columns;
+  const int x_offset = context->x_offset;
+  const int scaled_width = context->scaled_width;
+  const int position_x = context->position_x;
+  const float *const blues = context->blues;
+  const float *const greens = context->greens;
+  const float *const reds = context->reds;
+  const float *const opacities = context->opacities;
+  uint8_t *const scratch = context->scratch;
+  const int pixels = rows * columns;
+  uint8_t *const scratch_blues = scratch;
+  uint8_t *const scratch_greens = scratch_blues + pixels;
+  uint8_t *const scratch_reds = scratch_greens + pixels;
+  uint8_t *const scratch_opacities = scratch_reds + pixels;
+
+  BITMAPINFO bitmapinfo = {
+      .bmiHeader =
+          {
+              .biSize = sizeof(BITMAPINFOHEADER),
+              .biWidth = scaled_width,
+              .biHeight = -scaled_height,
+              .biPlanes = 1,
+              .biBitCount = 32,
+              .biCompression = BI_RGB,
+              .biSizeImage = 0,
+              .biXPelsPerMeter = 0,
+              .biYPelsPerMeter = 0,
+              .biClrUsed = 0,
+              .biClrImportant = 0,
+          },
+      .bmiColors =
+          {{.rgbRed = 0, .rgbGreen = 0, .rgbBlue = 0, .rgbReserved = 0}},
+  };
+
+  HDC screen_hdc = GetDC(NULL);
+
+  if (screen_hdc == NULL) {
+    return "Failed to get a DC for the screen.";
+  }
+
+  uint8_t *pixel_bytes = NULL;
+  HBITMAP hBitmap = CreateDIBSection(screen_hdc, &bitmapinfo, DIB_RGB_COLORS,
+                                     (void **)&pixel_bytes, NULL, 0);
+
+  if (hBitmap == NULL) {
+    if (ReleaseDC(NULL, screen_hdc)) {
+      return "Failed to create a DIB section.";
+    } else {
+      return "Failed to create a DIB section.  Additionally failed to release "
+             "a DC for the screen.";
+    }
+  }
+
+  HDC hdcMem = CreateCompatibleDC(screen_hdc);
+
+  if (hdcMem == NULL) {
+    if (DeleteObject(hBitmap)) {
+      if (ReleaseDC(NULL, screen_hdc)) {
+        return "Failed to create a compatible DC.";
+      } else {
+        return "Failed to create a compatible DC.  Additionally failed to "
+               "release a DC for the screen.";
+      }
+    } else {
+      if (ReleaseDC(NULL, screen_hdc)) {
+        return "Failed to create a compatible DC.  Additionally failed to "
+               "delete a DIB section.";
+      } else {
+        return "Failed to create a compatible DC.  Additionally failed to "
+               "delete a DIB section and release a DC for the screen.";
+      }
+    }
+  }
+
+  HBITMAP hOld = (HBITMAP)SelectObject(hdcMem, hBitmap);
+
+  if (hOld == NULL) {
+    if (DeleteObject(hdcMem)) {
+      if (DeleteObject(hBitmap)) {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to select a compatible DC.";
+        } else {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "release a DC for the screen.";
+        }
+      } else {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a DIB section.";
+        } else {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a DIB section and release a DC for the screen.";
+        }
+      }
+    } else {
+      if (DeleteObject(hBitmap)) {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a compatible DC.";
+        } else {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a compatible DC and release a DC for the screen.";
+        }
+      } else {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a compatible DC and delete a DIB section.";
+        } else {
+          return "Failed to select a compatible DC.  Additionally failed to "
+                 "delete a compatible DC and delete a DIB section and release "
+                 "a DC for the screen.";
+        }
+      }
+    }
+  }
+
+  for (int source_index = 0; source_index < pixels; source_index++) {
+    const float opacity = opacities[source_index] * 255.0f;
+    scratch_blues[source_index] = blues[source_index] * opacity;
+    scratch_greens[source_index] = greens[source_index] * opacity;
+    scratch_reds[source_index] = reds[source_index] * opacity;
+    scratch_opacities[source_index] = opacity;
+  }
+
+  const float y_per_row = ((float)rows) / ((float)scaled_height);
+  const int rows_minus_one = rows - 1;
+  const float x_per_column = ((float)columns) / ((float)scaled_width);
+  const int columns_minus_one = columns - 1;
+  int destination_index = 0;
+
+  for (int row = 0; row < scaled_height; row++) {
+    int y = row * y_per_row;
+
+    if (y < 0) {
+      y = 0;
+    }
+
+    if (y > rows_minus_one) {
+      y = rows_minus_one;
+    }
+
+    const int y_index = y * columns;
+
+    for (int column = 0; column < scaled_width; column++) {
+      int x = column * x_per_column;
+
+      if (x < 0) {
+        x = 0;
+      }
+
+      if (x > columns_minus_one) {
+        x = columns_minus_one;
+      }
+
+      const int source_index = y_index + x;
+
+      pixel_bytes[destination_index++] = scratch_blues[source_index];
+      pixel_bytes[destination_index++] = scratch_greens[source_index];
+      pixel_bytes[destination_index++] = scratch_reds[source_index];
+      pixel_bytes[destination_index++] = scratch_opacities[source_index];
+    }
+  }
+
+  (void)(x_offset);
+  (void)(y_offset);
+  POINT ptPos = {position_x, position_y};
+  SIZE sizeWnd = {scaled_width, scaled_height};
+  POINT ptSrc = {0, 0};
+
+  BLENDFUNCTION blend = {0};
+  blend.BlendOp = AC_SRC_OVER;
+  blend.SourceConstantAlpha = 255;
+  blend.AlphaFormat = AC_SRC_ALPHA;
+
+  if (UpdateLayeredWindow(hwnd, screen_hdc, &ptPos, &sizeWnd, hdcMem, &ptSrc, 0,
+                          &blend, ULW_ALPHA) == 0) {
+    if (SelectObject(hdcMem, hOld) == NULL) {
+      if (DeleteObject(hdcMem)) {
+        if (DeleteObject(hBitmap)) {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC and release a DC "
+                   "for the screen.";
+          }
+        } else {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC and delete a DIB "
+                   "section.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC, delete a DIB "
+                   "section and release a DC for the screen.";
+          }
+        }
+      } else {
+        if (DeleteObject(hBitmap)) {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC and delete a "
+                   "compatible DC.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC , delete a "
+                   "compatible DC and release a DC for the screen.";
+          }
+        } else {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC, delete a "
+                   "compatible DC and delete a DIB section.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "revert the selection of a compatible DC, delete a "
+                   "compatible DC, delete a DIB section and release a DC for "
+                   "the screen.";
+          }
+        }
+      }
+    } else {
+      if (DeleteObject(hdcMem)) {
+        if (DeleteObject(hBitmap)) {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "release a DC for the screen.";
+          }
+        } else {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a DIB section.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a DIB section and release a DC for the screen.";
+          }
+        }
+      } else {
+        if (DeleteObject(hBitmap)) {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a compatible DC.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a compatible DC and release a DC for the screen.";
+          }
+        } else {
+          if (ReleaseDC(NULL, screen_hdc)) {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a compatible DC and delete a DIB section.";
+          } else {
+            return "Failed to update a layered window.  Additionally failed to "
+                   "delete a compatible DC, delete a DIB section and release "
+                   "a DC for the screen.";
+          }
+        }
+      }
+    }
+  }
+
+  if (SelectObject(hdcMem, hOld) == NULL) {
+    if (DeleteObject(hdcMem)) {
+      if (DeleteObject(hBitmap)) {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to revert the selection of a compatible DC.";
+        } else {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to release a DC for the screen.";
+        }
+      } else {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a DIB section.";
+        } else {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a DIB section and release a DC "
+                 "for the screen.";
+        }
+      }
+    } else {
+      if (DeleteObject(hBitmap)) {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a compatible DC.";
+        } else {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a compatible DC and release a "
+                 "DC for the screen.";
+        }
+      } else {
+        if (ReleaseDC(NULL, screen_hdc)) {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a compatible DC and delete a "
+                 "DIB section.";
+        } else {
+          return "Failed to revert the selection of a compatible DC.  "
+                 "Additionally failed to delete a compatible DC and delete a "
+                 "DIB section and release a DC for the screen.";
+        }
+      }
+    }
+  }
+
+  if (!DeleteObject(hdcMem)) {
+    if (DeleteObject(hBitmap)) {
+      if (ReleaseDC(NULL, screen_hdc)) {
+        return "Failed to delete a compatible DC.";
+      } else {
+        return "Failed to delete a compatible DC.  Additionally failed to "
+               "release a DC for the screen.";
+      }
+    } else {
+      if (ReleaseDC(NULL, screen_hdc)) {
+        return "Failed to delete a compatible DC.  Additionally failed to "
+               "delete a DIB section.";
+      } else {
+        return "Failed to delete a compatible DC.  Additionally failed to "
+               "delete a DIB section and release a DC for the screen.";
+      }
+    }
+  }
+
+  if (!DeleteObject(hBitmap)) {
+    if (ReleaseDC(NULL, screen_hdc)) {
+      return "Failed to delete a DIB section.";
+    } else {
+      return "Failed to delete a DIB section.  Additionally failed to release "
+             "a DC for the screen.";
+    }
+  }
+
+  if (!ReleaseDC(NULL, screen_hdc)) {
+    return "Failed to release a DC for the screen.";
+  }
+
+  return NULL;
+}
+
 static LRESULT repaint(const HWND hwnd, const UINT uMsg, const WPARAM wParam,
                        const LPARAM lParam, context *const context) {
   if (context->audio_paused) {
@@ -156,11 +525,18 @@ static LRESULT repaint(const HWND hwnd, const UINT uMsg, const WPARAM wParam,
     }
   }
 
+  if (context->opacities == NULL) {
   if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
     context->error = "Failed to invalidate the window.";
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
   } else {
     return 0;
+    }
+  } else {
+    context->error = refresh_layered(hwnd, context);
+
+    return context->error == NULL ? 0
+                                  : DefWindowProc(hwnd, uMsg, wParam, lParam);
   }
 }
 
@@ -190,8 +566,11 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
 
     float *const start_of_buffers =
         (float *)(((uint8_t *)our_context->scratch) +
-                  our_context->rows * (our_context->columns * 3 +
-                                       our_context->skipped_bytes_per_row));
+                  our_context->rows *
+                      (our_context->opacities == NULL
+                           ? (our_context->columns * 3 +
+                              our_context->skipped_bytes_per_row)
+                           : (our_context->columns * 4)));
     float *buffer = start_of_buffers + samples_per_tick * 2 * next_buffer;
     const float *left = our_context->left;
     const float *right = our_context->right;
@@ -247,6 +626,16 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
   }
 
   case WM_PAINT: {
+    if (our_context->audio_paused) {
+      if (waveOutRestart(our_context->hwaveout) != MMSYSERR_NOERROR) {
+        our_context->error = "Failed to restart wave out.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      } else {
+        our_context->audio_paused = false;
+      }
+    }
+
+    if (our_context->opacities == NULL) {
     PAINTSTRUCT paint;
     HDC hdc = BeginPaint(hwnd, &paint);
 
@@ -365,6 +754,9 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
 
     EndPaint(hwnd, &paint);
     return 0;
+    } else {
+      return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
   }
 
   case WM_WINDOWPOSCHANGED: {
@@ -403,7 +795,10 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
 
     RECT insets = {0, 0, 0, 0};
 
-    if (AdjustWindowRect(&insets, OPAQUE_WS, FALSE)) {
+    if (AdjustWindowRect(&insets,
+                         our_context->opacities == NULL ? OPAQUE_WS
+                                                        : TRANSPARENT_WS,
+                         FALSE)) {
       lpMMI->ptMinTrackSize.x =
           our_context->columns + insets.right - insets.left;
       lpMMI->ptMinTrackSize.y = our_context->rows + insets.bottom - insets.top;
@@ -447,7 +842,10 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
 
     RECT insets = {0, 0, 0, 0};
 
-    if (AdjustWindowRect(&insets, WS_OVERLAPPEDWINDOW, FALSE)) {
+    if (AdjustWindowRect(&insets,
+                         our_context->opacities == NULL ? OPAQUE_WS
+                                                        : TRANSPARENT_WS,
+                         FALSE)) {
       RECT inner = {outer->left - insets.left, outer->top - insets.top,
                     outer->right - insets.right, outer->bottom - insets.bottom};
 
@@ -674,8 +1072,9 @@ const char *run_event_loop(
                        const float pointer_row, const float pointer_column,
                        bool (*const key_held)(const void *const context,
                                               const WPARAM virtual_key_code)),
-    const int rows, const int columns, const float *const reds,
-    const float *const greens, const float *const blues,
+    const int rows, const int columns, const float *const opacities,
+    const float *const reds, const float *const greens,
+    const float *const blues,
     void (*const video)(const void *const context, const int pointer_state,
                         const float pointer_row, const float pointer_column,
                         bool (*const key_held)(const void *const context,
@@ -687,14 +1086,17 @@ const char *run_event_loop(
   // We also need a minimum of enough buffers for 100msec in my experience.
   int buffers = ((int)ceil(max(1, 1.0 / 10 / (1.0 / ticks_per_second)))) + 1;
 
-  const int bytes_per_row = GDI_WIDTHBYTES(columns * 24);
+  const int bytes_per_row =
+      opacities == NULL ? (int)GDI_WIDTHBYTES(columns * 24) : columns * 4;
 
   context context = {
       .ticks_per_second = ticks_per_second,
       .tick = tick,
       .rows = rows,
       .columns = columns,
-      .skipped_bytes_per_row = bytes_per_row - (columns * 3),
+      .skipped_bytes_per_row =
+          opacities == NULL ? bytes_per_row - (columns * 3) : 0,
+      .opacities = opacities,
       .reds = reds,
       .greens = greens,
       .blues = blues,
@@ -731,7 +1133,8 @@ const char *run_event_loop(
 
   RECT insets = {0, 0, 0, 0};
 
-  if (!AdjustWindowRect(&insets, OPAQUE_WS, FALSE)) {
+  if (!AdjustWindowRect(&insets, opacities == NULL ? OPAQUE_WS : TRANSPARENT_WS,
+                        FALSE)) {
     free(context.scratch);
 
     return "Failed to calculate the dimensions of the window.";
@@ -775,7 +1178,10 @@ const char *run_event_loop(
   }
 
   HWND hwnd = CreateWindowEx(
-      0, title, title, OPAQUE_WS, CW_USEDEFAULT, CW_USEDEFAULT,
+      opacities == NULL ? 0 : WS_EX_LAYERED, title, title,
+      opacities == NULL ? OPAQUE_WS : TRANSPARENT_WS,
+      opacities == NULL ? CW_USEDEFAULT : 100,
+      opacities == NULL ? CW_USEDEFAULT : 100,
       columns + insets.right - insets.left, rows + insets.bottom - insets.top,
       HWND_DESKTOP, NULL, wc.hInstance, &context);
 
@@ -816,6 +1222,10 @@ const char *run_event_loop(
 
   context.position_x = window_rect.left;
   context.position_y = window_rect.top;
+
+  if (opacities != NULL) {
+    refresh_layered(hwnd, &context);
+  }
 
   const WAVEFORMATEX wave_format = {
       WAVE_FORMAT_IEEE_FLOAT,

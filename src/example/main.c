@@ -4,10 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
+#include <winuser.h>
 
 #define ROWS 192
 #define COLUMNS 256
 
+static float opacities[COLUMNS * ROWS];
 static float reds[COLUMNS * ROWS];
 static float greens[COLUMNS * ROWS];
 static float blues[COLUMNS * ROWS];
@@ -116,6 +118,7 @@ static void video_pointer(const int state, const float row, const float column,
   }
 
   const int index = rounded_row * COLUMNS + rounded_column;
+  opacities[index] = 1.0f;
   reds[index] = red;
   greens[index] = green;
   blues[index] = blue;
@@ -128,6 +131,7 @@ static void video(const void *const context, const int pointer_state,
                   const float tick_progress_unit_interval) {
   for (int row = 0; row < ROWS; row++) {
     for (int column = 0; column < COLUMNS; column++) {
+      opacities[row * COLUMNS + column] = 0.25f;
       reds[row * COLUMNS + column] = 0.2f;
       greens[row * COLUMNS + column] = (row * 0.3f) / ROWS;
       blues[row * COLUMNS + column] = (row * 0.9f) / ROWS;
@@ -146,6 +150,7 @@ static void video(const void *const context, const int pointer_state,
 
   for (int row = y - 2; row < y + 2; row++) {
     for (int column = x - 2; column < x + 2; column++) {
+      opacities[row * COLUMNS + column] = 1.0f;
       reds[row * COLUMNS + column] = 1;
       greens[row * COLUMNS + column] = key_held(context, VK_SPACE) ? 1 : 0;
       blues[row * COLUMNS + column] = 1;
@@ -175,8 +180,13 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   ticks = 2;
 
   const char *const error_message = run_event_loop(
-      "Example Application", 100, tick, ROWS, COLUMNS, reds, greens, blues,
-      video, SAMPLES_PER_TICK, left, right, nShowCmd);
+      "Example Application", 100, tick, ROWS, COLUMNS,
+      MessageBox(HWND_DESKTOP,
+                 "Would you like to display a transparent window?", "Example",
+                 MB_YESNO | MB_ICONQUESTION) == IDYES
+          ? opacities
+          : NULL,
+      reds, greens, blues, video, SAMPLES_PER_TICK, left, right, nShowCmd);
 
   if (error_message == NULL) {
     printf("Successfully completed.\n");

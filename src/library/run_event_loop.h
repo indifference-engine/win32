@@ -43,6 +43,14 @@
  *             less than 1.
  * @param columns The width of the viewport in columns.  Behavior is undefined
  *                if less than 1.
+ * @param opacities The opacity of each pixel within the viewport, row-major,
+ *                  starting from the top left corner, where 0 is fully
+ *                  transparent and 1 is fully opaque.  Behavior is undefined if
+ *                  any are NaN, less than 0 or greater than 1.  When NULL, the
+ *                  window is fully opaque and features a full frame including
+ *                  the caption area.  It otherwise lacks a visible frame; its
+ *                  (invisible) frame may be dragged to change the window's size
+ *                  and by effect its position.
  * @param reds The intensity of the red channel of each pixel within the
  *             viewport, row-major, starting from the top left corner.  Behavior
  *             is undefined if any are NaN, less than 0 or greater than 1.
@@ -69,18 +77,20 @@
  *         message describing the problem, otherwise, null.
  */
 const char *run_event_loop(
-    const char *const title,
-    const int ticks_per_second,
-    void (*const tick)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code)),
-    const int rows,
-    const int columns,
-    const float *const reds,
-    const float *const greens,
+    const char *const title, const int ticks_per_second,
+    void (*const tick)(const void *const context, const int pointer_state,
+                       const float pointer_row, const float pointer_column,
+                       bool (*const key_held)(const void *const context,
+                                              const WPARAM virtual_key_code)),
+    const int rows, const int columns, const float *const opacities,
+    const float *const reds, const float *const greens,
     const float *const blues,
-    void (*const video)(const void *const context, const int pointer_state, const float pointer_row, const float pointer_column, bool (*const key_held)(const void *const context, const WPARAM virtual_key_code), const float tick_progress_unit_interval),
-    const int samples_per_tick,
-    const float *const left,
-    const float *const right,
-    const int nCmdShow);
+    void (*const video)(const void *const context, const int pointer_state,
+                        const float pointer_row, const float pointer_column,
+                        bool (*const key_held)(const void *const context,
+                                               const WPARAM virtual_key_code),
+                        const float tick_progress_unit_interval),
+    const int samples_per_tick, const float *const left,
+    const float *const right, const int nCmdShow);
 
 #endif
