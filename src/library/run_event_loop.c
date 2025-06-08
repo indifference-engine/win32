@@ -709,7 +709,7 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
           y_offset + scaled_height + inverse_y_offset;
 
     if (x_offset > 0) {
-      if (!Rectangle(hdc, 0, 0, x_offset, destination_height)) {
+        if (!Rectangle(hdc, 0, 0, x_offset + 1, destination_height)) {
           EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the left border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -727,7 +727,7 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
 
     if (y_offset > 0) {
       if (!Rectangle(hdc, x_offset, 0, destination_width - inverse_x_offset,
-                     y_offset)) {
+                       y_offset + 1)) {
           EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the top border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
