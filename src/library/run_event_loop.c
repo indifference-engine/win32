@@ -303,7 +303,8 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     const int y_offset = our_context->y_offset;
     const int scaled_height = our_context->scaled_height;
     const int inverse_y_offset = our_context->inverse_y_offset;
-    const int destination_height = y_offset + scaled_height + inverse_y_offset;
+      const int destination_height =
+          y_offset + scaled_height + inverse_y_offset;
 
     if (x_offset > 0) {
       if (!Rectangle(hdc, 0, 0, x_offset, destination_height)) {
