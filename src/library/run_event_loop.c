@@ -526,11 +526,11 @@ static LRESULT repaint(const HWND hwnd, const UINT uMsg, const WPARAM wParam,
   }
 
   if (context->opacities == NULL) {
-  if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
-    context->error = "Failed to invalidate the window.";
-    return DefWindowProc(hwnd, uMsg, wParam, lParam);
-  } else {
-    return 0;
+    if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
+      context->error = "Failed to invalidate the window.";
+      return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    } else {
+      return 0;
     }
   } else {
     context->error = refresh_layered(hwnd, context);
@@ -636,124 +636,124 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
     }
 
     if (our_context->opacities == NULL) {
-    PAINTSTRUCT paint;
-    HDC hdc = BeginPaint(hwnd, &paint);
+      PAINTSTRUCT paint;
+      HDC hdc = BeginPaint(hwnd, &paint);
 
-    if (hdc == NULL) {
-      our_context->error = "Failed to begin painting.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
+      if (hdc == NULL) {
+        our_context->error = "Failed to begin painting.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      }
 
       our_context->error = video(our_context);
 
       if (our_context->error != NULL) {
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-
-    const int rows = our_context->rows;
-    const int columns = our_context->columns;
-    const int skipped_bytes_per_row = our_context->skipped_bytes_per_row;
-    const float *const reds = our_context->reds;
-    const float *const greens = our_context->greens;
-    const float *const blues = our_context->blues;
-    uint8_t *const pixels = our_context->scratch;
-
-    int input = 0;
-    int output = 0;
-
-    for (int row = 0; row < rows; row++) {
-      for (int column = 0; column < columns; column++) {
-        pixels[output++] = blues[input] * 255.0f;
-        pixels[output++] = greens[input] * 255.0f;
-        pixels[output++] = reds[input] * 255.0f;
-        input++;
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
 
-      output += skipped_bytes_per_row;
-    }
+      const int rows = our_context->rows;
+      const int columns = our_context->columns;
+      const int skipped_bytes_per_row = our_context->skipped_bytes_per_row;
+      const float *const reds = our_context->reds;
+      const float *const greens = our_context->greens;
+      const float *const blues = our_context->blues;
+      uint8_t *const pixels = our_context->scratch;
 
-    BITMAPINFO bitmapinfo = {.bmiHeader = {
-                                 sizeof(BITMAPINFO),
-                                 columns,
-                                 -rows,
-                                 1,
-                                 24,
-                                 BI_RGB,
-                                 0,
-                                 0,
-                                 0,
-                                 0,
-                                 0,
-                             }};
+      int input = 0;
+      int output = 0;
 
-    if (SelectObject(hdc, GetStockObject(NULL_PEN)) == NULL) {
+      for (int row = 0; row < rows; row++) {
+        for (int column = 0; column < columns; column++) {
+          pixels[output++] = blues[input] * 255.0f;
+          pixels[output++] = greens[input] * 255.0f;
+          pixels[output++] = reds[input] * 255.0f;
+          input++;
+        }
+
+        output += skipped_bytes_per_row;
+      }
+
+      BITMAPINFO bitmapinfo = {.bmiHeader = {
+                                   sizeof(BITMAPINFO),
+                                   columns,
+                                   -rows,
+                                   1,
+                                   24,
+                                   BI_RGB,
+                                   0,
+                                   0,
+                                   0,
+                                   0,
+                                   0,
+                               }};
+
+      if (SelectObject(hdc, GetStockObject(NULL_PEN)) == NULL) {
         EndPaint(hwnd, &paint);
-      our_context->error = "Failed to set the pen.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
+        our_context->error = "Failed to set the pen.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      }
 
-    if (SelectObject(hdc, GetStockObject(BLACK_BRUSH)) == NULL) {
+      if (SelectObject(hdc, GetStockObject(BLACK_BRUSH)) == NULL) {
         EndPaint(hwnd, &paint);
-      our_context->error = "Failed to set the brush.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
+        our_context->error = "Failed to set the brush.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      }
 
-    const int x_offset = our_context->x_offset;
-    const int scaled_width = our_context->scaled_width;
-    const int inverse_x_offset = our_context->inverse_x_offset;
-    const int destination_width = x_offset + scaled_width + inverse_x_offset;
-    const int y_offset = our_context->y_offset;
-    const int scaled_height = our_context->scaled_height;
-    const int inverse_y_offset = our_context->inverse_y_offset;
+      const int x_offset = our_context->x_offset;
+      const int scaled_width = our_context->scaled_width;
+      const int inverse_x_offset = our_context->inverse_x_offset;
+      const int destination_width = x_offset + scaled_width + inverse_x_offset;
+      const int y_offset = our_context->y_offset;
+      const int scaled_height = our_context->scaled_height;
+      const int inverse_y_offset = our_context->inverse_y_offset;
       const int destination_height =
           y_offset + scaled_height + inverse_y_offset;
 
-    if (x_offset > 0) {
+      if (x_offset > 0) {
         if (!Rectangle(hdc, 0, 0, x_offset + 1, destination_height)) {
           EndPaint(hwnd, &paint);
-        our_context->error = "Failed draw the left border.";
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+          our_context->error = "Failed draw the left border.";
+          return DefWindowProc(hwnd, uMsg, wParam, lParam);
+        }
       }
-    }
 
-    if (inverse_x_offset > 0) {
-      if (!Rectangle(hdc, destination_width - inverse_x_offset, 0,
-                     destination_width, destination_height)) {
+      if (inverse_x_offset > 0) {
+        if (!Rectangle(hdc, destination_width - inverse_x_offset, 0,
+                       destination_width, destination_height)) {
           EndPaint(hwnd, &paint);
-        our_context->error = "Failed draw the right border.";
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+          our_context->error = "Failed draw the right border.";
+          return DefWindowProc(hwnd, uMsg, wParam, lParam);
+        }
       }
-    }
 
-    if (y_offset > 0) {
-      if (!Rectangle(hdc, x_offset, 0, destination_width - inverse_x_offset,
+      if (y_offset > 0) {
+        if (!Rectangle(hdc, x_offset, 0, destination_width - inverse_x_offset,
                        y_offset + 1)) {
           EndPaint(hwnd, &paint);
-        our_context->error = "Failed draw the top border.";
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+          our_context->error = "Failed draw the top border.";
+          return DefWindowProc(hwnd, uMsg, wParam, lParam);
+        }
       }
-    }
 
-    if (inverse_y_offset > 0) {
-      if (!Rectangle(hdc, x_offset, destination_height - inverse_y_offset,
-                     destination_width - inverse_x_offset,
-                     destination_height)) {
+      if (inverse_y_offset > 0) {
+        if (!Rectangle(hdc, x_offset, destination_height - inverse_y_offset,
+                       destination_width - inverse_x_offset,
+                       destination_height)) {
           EndPaint(hwnd, &paint);
-        our_context->error = "Failed draw the bottom border.";
+          our_context->error = "Failed draw the bottom border.";
+          return DefWindowProc(hwnd, uMsg, wParam, lParam);
+        }
+      }
+
+      if (StretchDIBits(hdc, x_offset, y_offset, scaled_width, scaled_height, 0,
+                        0, columns, rows, pixels, &bitmapinfo, DIB_RGB_COLORS,
+                        SRCCOPY) == 0) {
+        EndPaint(hwnd, &paint);
+        our_context->error = "Failed to paint the framebuffer.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
-    }
 
-    if (StretchDIBits(hdc, x_offset, y_offset, scaled_width, scaled_height, 0,
-                      0, columns, rows, pixels, &bitmapinfo, DIB_RGB_COLORS,
-                      SRCCOPY) == 0) {
-        EndPaint(hwnd, &paint);
-      our_context->error = "Failed to paint the framebuffer.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-
-    EndPaint(hwnd, &paint);
-    return 0;
+      EndPaint(hwnd, &paint);
+      return 0;
     } else {
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
