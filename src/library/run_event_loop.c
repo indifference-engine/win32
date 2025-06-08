@@ -77,6 +77,42 @@ static bool key_held(const void *const _context,
   return false;
 }
 
+static const char *video(const context *const context) {
+  const HWAVEOUT hwaveout = context->hwaveout;
+
+  if (hwaveout == NULL) {
+    context->video(context, context->pointer_state, context->pointer_row,
+                   context->pointer_column, key_held, 0.0f);
+  } else {
+
+    MMTIME mmtime = {.wType = TIME_SAMPLES};
+
+    if (waveOutGetPosition(hwaveout, &mmtime, sizeof(mmtime)) !=
+        MMSYSERR_NOERROR) {
+      return "Failed to get wave out position.";
+    }
+
+    if (mmtime.wType != TIME_SAMPLES) {
+      return "Wave out position does not support sample time.";
+    }
+
+    const int samples_per_tick = context->samples_per_tick;
+
+    const DWORD minimum_position = context->minimum_position;
+
+    const DWORD position = mmtime.u.sample;
+    const DWORD elapsed = position < minimum_position
+                              ? position + ((4294967295 - minimum_position) + 1)
+                              : position - minimum_position;
+
+    context->video(context, context->pointer_state, context->pointer_row,
+                   context->pointer_column, key_held,
+                   max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
+  }
+
+  return NULL;
+}
+
 static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg,
                                   const WPARAM wParam, const LPARAM lParam,
                                   context *const context) {
@@ -204,32 +240,11 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
-    MMTIME mmtime = {.wType = TIME_SAMPLES};
+      our_context->error = video(our_context);
 
-    if (waveOutGetPosition(our_context->hwaveout, &mmtime, sizeof(mmtime)) !=
-        MMSYSERR_NOERROR) {
-      our_context->error = "Failed to get wave out position.";
+      if (our_context->error != NULL) {
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
-
-    if (mmtime.wType != TIME_SAMPLES) {
-      our_context->error = "Wave out position does not support sample time.";
-      return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-
-    const int samples_per_tick = our_context->samples_per_tick;
-
-    const DWORD minimum_position = our_context->minimum_position;
-
-    const DWORD position = mmtime.u.sample;
-    const DWORD elapsed = position < minimum_position
-                              ? position + ((4294967295 - minimum_position) + 1)
-                              : position - minimum_position;
-
-    our_context->video(our_context, our_context->pointer_state,
-                       our_context->pointer_row, our_context->pointer_column,
-                       key_held,
-                       max(0.0f, min(1.0f, elapsed / (float)samples_per_tick)));
 
     const int rows = our_context->rows;
     const int columns = our_context->columns;
@@ -669,6 +684,7 @@ const char *run_event_loop(
       .scratch = malloc(sizeof(uint8_t) * rows * bytes_per_row +
                         sizeof(float) * 2 * buffers * samples_per_tick +
                         sizeof(WAVEHDR) * buffers),
+      .hwaveout = NULL,
       .next_buffer = 0,
       .buffers = buffers,
       .minimum_position = 0,
