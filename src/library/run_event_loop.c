@@ -287,11 +287,13 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
                              }};
 
     if (SelectObject(hdc, GetStockObject(NULL_PEN)) == NULL) {
+        EndPaint(hwnd, &paint);
       our_context->error = "Failed to set the pen.";
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
     if (SelectObject(hdc, GetStockObject(BLACK_BRUSH)) == NULL) {
+        EndPaint(hwnd, &paint);
       our_context->error = "Failed to set the brush.";
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
@@ -308,6 +310,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
 
     if (x_offset > 0) {
       if (!Rectangle(hdc, 0, 0, x_offset, destination_height)) {
+          EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the left border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
@@ -316,6 +319,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     if (inverse_x_offset > 0) {
       if (!Rectangle(hdc, destination_width - inverse_x_offset, 0,
                      destination_width, destination_height)) {
+          EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the right border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
@@ -324,6 +328,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     if (y_offset > 0) {
       if (!Rectangle(hdc, x_offset, 0, destination_width - inverse_x_offset,
                      y_offset)) {
+          EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the top border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
@@ -333,6 +338,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
       if (!Rectangle(hdc, x_offset, destination_height - inverse_y_offset,
                      destination_width - inverse_x_offset,
                      destination_height)) {
+          EndPaint(hwnd, &paint);
         our_context->error = "Failed draw the bottom border.";
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
       }
@@ -341,6 +347,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     if (StretchDIBits(hdc, x_offset, y_offset, scaled_width, scaled_height, 0,
                       0, columns, rows, pixels, &bitmapinfo, DIB_RGB_COLORS,
                       SRCCOPY) == 0) {
+        EndPaint(hwnd, &paint);
       our_context->error = "Failed to paint the framebuffer.";
       return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
