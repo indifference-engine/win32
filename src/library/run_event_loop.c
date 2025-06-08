@@ -762,8 +762,21 @@ static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
   case WM_WINDOWPOSCHANGED: {
     const WINDOWPOS *const windowpos = (const WINDOWPOS *const)lParam;
 
-    const int width = windowpos->cx;
-    const int height = windowpos->cy;
+    int width = windowpos->cx;
+    int height = windowpos->cy;
+
+    if (our_context->opacities == NULL) {
+      RECT insets = {0, 0, 0, 0};
+
+      if (AdjustWindowRect(&insets, OPAQUE_WS, FALSE)) {
+        width += insets.left;
+        height += insets.top;
+      } else {
+        our_context->error =
+            "Failed to calculate the dimensions of the window.";
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+      }
+    }
 
     const int columns = our_context->columns;
     const int rows = our_context->rows;
