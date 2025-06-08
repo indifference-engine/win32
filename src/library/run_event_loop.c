@@ -720,6 +720,13 @@ const char *run_event_loop(
     return "Failed to retrieve the module handle.";
   }
 
+  const HCURSOR cursor = LoadCursor(NULL, IDC_ARROW);
+
+  if (cursor == NULL) {
+    free(context.scratch);
+    return "Failed to retrieve the default cursor.";
+  }
+
   WNDCLASSEX wc = {
       .cbSize = sizeof(WNDCLASSEX),
       .style = 0,
@@ -730,7 +737,7 @@ const char *run_event_loop(
       .hIcon = (HICON)LoadImage(instance, MAKEINTRESOURCE(1), IMAGE_ICON,
                                 GetSystemMetrics(SM_CXICON),
                                 GetSystemMetrics(SM_CYICON), 0),
-      .hCursor = NULL,
+      .hCursor = cursor,
       .hbrBackground = NULL,
       .lpszMenuName = NULL,
       .lpszClassName = title,
