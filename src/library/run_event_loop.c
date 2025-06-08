@@ -145,8 +145,28 @@ static LRESULT handle_mouse_event(const HWND hwnd, const UINT uMsg,
   }
 }
 
-static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
-                                         LPARAM lParam) {
+static LRESULT repaint(const HWND hwnd, const UINT uMsg, const WPARAM wParam,
+                       const LPARAM lParam, context *const context) {
+  if (context->audio_paused) {
+    if (waveOutRestart(context->hwaveout) != MMSYSERR_NOERROR) {
+      context->error = "Failed to restart wave out.";
+      return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    } else {
+      context->audio_paused = false;
+    }
+  }
+
+  if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
+    context->error = "Failed to invalidate the window.";
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+  } else {
+    return 0;
+  }
+}
+
+static LRESULT CALLBACK window_procedure(const HWND hwnd, const UINT uMsg,
+                                         const WPARAM wParam,
+                                         const LPARAM lParam) {
   if (uMsg == WM_CREATE) {
     context *const our_context = ((CREATESTRUCT *)lParam)->lpCreateParams;
     if (SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)our_context) == 0) {
@@ -227,15 +247,6 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
   }
 
   case WM_PAINT: {
-    if (our_context->audio_paused) {
-      if (waveOutRestart(our_context->hwaveout) != MMSYSERR_NOERROR) {
-        our_context->error = "Failed to restart wave out.";
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
-      } else {
-        our_context->audio_paused = false;
-      }
-    }
-
     PAINTSTRUCT paint;
     HDC hdc = BeginPaint(hwnd, &paint);
 
@@ -381,16 +392,11 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
     our_context->position_x = windowpos->x;
     our_context->position_y = windowpos->y;
 
-    if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
-      our_context->error = "Failed to invalidate the window.";
-    }
+    return repaint(hwnd, uMsg, wParam, lParam, our_context);
   }
 
   case WM_APP:
-    if (InvalidateRect(hwnd, NULL, FALSE) == 0) {
-      our_context->error = "Failed to invalidate the window.";
-    }
-    return 0;
+    return repaint(hwnd, uMsg, wParam, lParam, our_context);
 
   case WM_GETMINMAXINFO: {
     LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
