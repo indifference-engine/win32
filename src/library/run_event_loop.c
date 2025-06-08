@@ -688,10 +688,10 @@ const char *run_event_loop(
     return "Failed to register the window class.";
   }
 
-  HWND hwnd = CreateWindow(title, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                           CW_USEDEFAULT, columns + insets.right - insets.left,
-                           rows + insets.bottom - insets.top, NULL, NULL,
-                           wc.hInstance, &context);
+  HWND hwnd = CreateWindowEx(
+      0, title, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+      columns + insets.right - insets.left, rows + insets.bottom - insets.top,
+      NULL, NULL, wc.hInstance, &context);
 
   if (hwnd == NULL) {
     free(context.scratch);
