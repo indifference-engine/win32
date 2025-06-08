@@ -691,7 +691,7 @@ const char *run_event_loop(
   HWND hwnd = CreateWindowEx(
       0, title, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
       columns + insets.right - insets.left, rows + insets.bottom - insets.top,
-      NULL, NULL, wc.hInstance, &context);
+      HWND_DESKTOP, NULL, wc.hInstance, &context);
 
   if (hwnd == NULL) {
     free(context.scratch);
