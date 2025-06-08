@@ -1,6 +1,6 @@
 #include "winuser.h"
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "src/example/manifest.manifest"
-id ICON "example.ico"
+1 ICON "example.ico"
 1 VERSIONINFO
 FILEVERSION     1,0,0,0
 PRODUCTVERSION  1,0,0,0

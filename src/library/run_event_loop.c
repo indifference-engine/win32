@@ -697,18 +697,32 @@ const char *run_event_loop(
     return "Failed to calculate the dimensions of the window.";
   }
 
-  WNDCLASS wc = {
-      .lpfnWndProc = window_procedure,
-      .hInstance = GetModuleHandle(NULL),
-      .lpszClassName = title,
-  };
+  HINSTANCE instance = GetModuleHandle(NULL);
 
-  if (wc.hInstance == NULL) {
+  if (instance == NULL) {
     free(context.scratch);
     return "Failed to retrieve the module handle.";
   }
 
-  if (RegisterClass(&wc) == 0) {
+  WNDCLASSEX wc = {
+      .cbSize = sizeof(WNDCLASSEX),
+      .style = 0,
+      .lpfnWndProc = window_procedure,
+      .cbClsExtra = 0,
+      .cbWndExtra = 0,
+      .hInstance = instance,
+      .hIcon = (HICON)LoadImage(instance, MAKEINTRESOURCE(1), IMAGE_ICON,
+                                GetSystemMetrics(SM_CXICON),
+                                GetSystemMetrics(SM_CYICON), 0),
+      .hCursor = NULL,
+      .hbrBackground = NULL,
+      .lpszMenuName = NULL,
+      .lpszClassName = title,
+      .hIconSm = (HICON)LoadImage(instance, MAKEINTRESOURCE(1), IMAGE_ICON,
+                                  GetSystemMetrics(SM_CXSMICON),
+                                  GetSystemMetrics(SM_CYSMICON), 0)};
+
+  if (RegisterClassEx(&wc) == 0) {
     free(context.scratch);
     return "Failed to register the window class.";
   }
