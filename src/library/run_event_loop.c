@@ -13,6 +13,8 @@
 #define VSYNC_CONTEXT_STATE_STOPPING 2
 #define VSYNC_CONTEXT_STATE_STOPPED 3
 
+#define OPAQUE_WS WS_OVERLAPPEDWINDOW
+
 typedef struct {
   const HWND hwnd;
   int state;
@@ -387,7 +389,7 @@ static LRESULT CALLBACK window_procedure(HWND hwnd, UINT uMsg, WPARAM wParam,
 
     RECT insets = {0, 0, 0, 0};
 
-    if (AdjustWindowRect(&insets, WS_OVERLAPPEDWINDOW, FALSE)) {
+    if (AdjustWindowRect(&insets, OPAQUE_WS, FALSE)) {
       lpMMI->ptMinTrackSize.x =
           our_context->columns + insets.right - insets.left;
       lpMMI->ptMinTrackSize.y = our_context->rows + insets.bottom - insets.top;
@@ -715,7 +717,7 @@ const char *run_event_loop(
 
   RECT insets = {0, 0, 0, 0};
 
-  if (!AdjustWindowRect(&insets, WS_OVERLAPPEDWINDOW, FALSE)) {
+  if (!AdjustWindowRect(&insets, OPAQUE_WS, FALSE)) {
     free(context.scratch);
 
     return "Failed to calculate the dimensions of the window.";
@@ -759,7 +761,7 @@ const char *run_event_loop(
   }
 
   HWND hwnd = CreateWindowEx(
-      0, title, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+      0, title, title, OPAQUE_WS, CW_USEDEFAULT, CW_USEDEFAULT,
       columns + insets.right - insets.left, rows + insets.bottom - insets.top,
       HWND_DESKTOP, NULL, wc.hInstance, &context);
 
