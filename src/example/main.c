@@ -132,7 +132,7 @@ static void video(const void *const context, const int pointer_state,
   for (int row = 0; row < ROWS; row++) {
     for (int column = 0; column < COLUMNS; column++) {
       opacities[row * COLUMNS + column] = 0.25f;
-      reds[row * COLUMNS + column] = 0.2f;
+      reds[row * COLUMNS + column] = (row + column) % 2 ? 0.2f : 0.7f;
       greens[row * COLUMNS + column] = (row * 0.3f) / ROWS;
       blues[row * COLUMNS + column] = (row * 0.9f) / ROWS;
     }
